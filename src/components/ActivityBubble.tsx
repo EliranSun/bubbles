@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { PointerEventHandler } from 'react'
+import type { ChangeEventHandler, PointerEventHandler } from 'react'
 import { getElapsedText } from '../utils/timeAgo'
 
 type BubbleBounds = {
@@ -11,6 +11,7 @@ type ActivityBubbleProps = {
   id: string
   label: string
   imageUrl: string
+  defaultImageUrl: string
   createdAt: string
   lastResetAt?: string
   x: number
@@ -20,6 +21,8 @@ type ActivityBubbleProps = {
   now: number
   onMove: (id: string, nextX: number, nextY: number) => void
   onReset: (id: string) => void
+  onImageChange: (id: string, imageDataUrl: string) => void
+  onImageLoadError: (id: string) => void
 }
 
 function clamp(value: number, min: number, max: number) {
@@ -30,6 +33,7 @@ export function ActivityBubble({
   id,
   label,
   imageUrl,
+  defaultImageUrl,
   createdAt,
   lastResetAt,
   x,
@@ -39,12 +43,20 @@ export function ActivityBubble({
   now,
   onMove,
   onReset,
+  onImageChange,
+  onImageLoadError,
 }: ActivityBubbleProps) {
   const pointerIdRef = useRef<number | null>(null)
   const dragStartRef = useRef({ pointerX: 0, pointerY: 0, startX: 0, startY: 0 })
   const movedRef = useRef(false)
   const mountedRef = useRef(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const [isResetAnimating, setIsResetAnimating] = useState(false)
+  const [hasImageError, setHasImageError] = useState(false)
+
+  useEffect(() => {
+    setHasImageError(false)
+  }, [imageUrl])
 
   useEffect(() => {
     if (!mountedRef.current) {
@@ -61,6 +73,8 @@ export function ActivityBubble({
 
   const maxX = Math.max(0, bounds.width - size)
   const maxY = Math.max(0, bounds.height - size)
+
+  const resolvedImageUrl = hasImageError ? defaultImageUrl : imageUrl
 
   const handlePointerDown: PointerEventHandler<HTMLButtonElement> = (event) => {
     pointerIdRef.current = event.pointerId
@@ -104,30 +118,89 @@ export function ActivityBubble({
     }
   }
 
+  const handleImageChangeClick = () => {
+    fileInputRef.current?.click()
+  }
+
+  const handleFileSelected: ChangeEventHandler<HTMLInputElement> = (event) => {
+    const file = event.target.files?.[0]
+
+    if (!file) {
+      return
+    }
+
+    const reader = new FileReader()
+    reader.onload = () => {
+      if (typeof reader.result !== 'string') {
+        return
+      }
+
+      onImageChange(id, reader.result)
+    }
+
+    reader.readAsDataURL(file)
+    event.target.value = ''
+  }
+
+  const handleImageError = () => {
+    if (hasImageError) {
+      return
+    }
+
+    setHasImageError(true)
+    onImageLoadError(id)
+  }
+
   return (
-    <button
-      type="button"
-      className={`absolute touch-none select-none rounded-full text-white shadow-xl transition-transform duration-300 ${
+    <div
+      className={`absolute touch-none select-none overflow-hidden rounded-full text-white shadow-xl transition-transform duration-300 ${
         isResetAnimating ? 'animate-bubble-reset' : ''
       }`}
-      onPointerDown={handlePointerDown}
-      onPointerMove={handlePointerMove}
-      onPointerUp={handlePointerEnd}
-      onPointerCancel={handlePointerEnd}
-      aria-label={`${label}, ${elapsedText}`}
       style={{
         width: size,
         height: size,
         transform: `translate(${x}px, ${y}px)`,
-        backgroundImage: `linear-gradient(to top, rgba(0, 0, 0, 0.75), rgba(0, 0, 0, 0.2) 60%, rgba(0,0,0,0.15)), url(${imageUrl})`,
-        backgroundSize: 'cover',
-        backgroundPosition: 'center',
       }}
     >
-      <span className="absolute inset-x-2 bottom-2 text-center">
-        <span className="block truncate text-sm font-semibold leading-tight">{label}</span>
-        <span className="block text-xs text-neutral-200">{elapsedText}</span>
-      </span>
-    </button>
+      <button
+        type="button"
+        className="absolute inset-0 z-10"
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerEnd}
+        onPointerCancel={handlePointerEnd}
+        aria-label={`${label}, ${elapsedText}`}
+      >
+        <img
+          src={resolvedImageUrl}
+          alt=""
+          className="h-full w-full object-cover"
+          onError={handleImageError}
+          draggable={false}
+        />
+        <span className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/25 to-black/15" />
+        <span className="absolute inset-x-2 bottom-2 text-center">
+          <span className="block truncate text-sm font-semibold leading-tight">{label}</span>
+          <span className="block text-xs text-neutral-200">{elapsedText}</span>
+        </span>
+      </button>
+
+      <button
+        type="button"
+        className="absolute right-2 top-2 z-20 rounded-full bg-black/55 p-1.5 text-xs leading-none text-white hover:bg-black/75 focus:outline-none focus:ring-2 focus:ring-white/70"
+        onClick={handleImageChangeClick}
+        aria-label={`Change image for ${label}`}
+      >
+        🖼️
+      </button>
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={handleFileSelected}
+      />
+    </div>
   )
 }
